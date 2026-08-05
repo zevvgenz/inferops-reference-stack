@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "reference-stack.fullname" . }}-app
+  labels:
+    {{- include "reference-stack.componentSelectorLabels" (dict "component" "app" "context" $) | nindent 4 }}
+    {{- include "reference-stack.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.app.service.type }}
+  selector:
+    {{- include "reference-stack.componentSelectorLabels" (dict "component" "app" "context" $) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.app.service.port }}
+      targetPort: http

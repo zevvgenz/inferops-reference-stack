@@ -1,0 +1,16 @@
+apiVersion: v2
+name: reference-stack
+description: >-
+  Reference three-tier stack (FastAPI + PostgreSQL + Redis) demonstrating
+  production-grade Kubernetes packaging and GitOps practices.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - reference
+  - gitops
+  - postgresql
+  - redis
+home: https://github.com/zevvgenz/inferops-reference-stack
+maintainers:
+  - name: inferops-reference-stack maintainers

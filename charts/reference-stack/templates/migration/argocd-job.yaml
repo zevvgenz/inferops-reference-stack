@@ -1,0 +1,72 @@
+{{/*
+GitOps path: ArgoCD uses its own hook lifecycle instead of Helm's — this
+renders as a plain Job with an ArgoCD PostSync hook annotation, not through
+`helm install/upgrade` hook machinery at all (ArgoCD doesn't invoke that).
+Mutually exclusive with job.yaml — see the `if` guard below and
+.Values.argocd.enabled. Do not enable both; the migration would run twice
+per sync.
+
+Why PostSync, not a pre-sync wave: see docs/decisions.md "Migration
+ordering". Same reasoning as the plain-Helm path — Postgres/Redis/Secret/
+ConfigMap are ordinary resources that sync in the main wave (wave 0)
+alongside this Job (hence wait-for-postgres below), and the app Deployment
+is gated by its own /readyz readiness probe rather than by sync-wave
+timing. ArgoCD's health check for a Job is "Completed", and PostSync hooks
+run after the main sync wave reaches a healthy state, which is sufficient
+ordering on its own — no sync-wave annotation needed.
+*/}}
+{{- if .Values.argocd.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "reference-stack.fullname" . }}-migration
+  labels:
+    {{- include "reference-stack.componentSelectorLabels" (dict "component" "migration" "context" $) | nindent 4 }}
+    {{- include "reference-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    # -- BeforeHookCreation: same reasoning as the plain-Helm Job's
+    # before-hook-creation (see job.yaml) — a leftover Job from a previous
+    # sync attempt must not block the next one. Deliberately NOT
+    # HookFailed — a failed migration Job must survive for `kubectl logs`
+    # debugging; the next BeforeHookCreation cleans it up on the next sync.
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: {{ .Values.migration.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "reference-stack.componentSelectorLabels" (dict "component" "migration" "context" $) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      # Intentionally runs under the namespace default ServiceAccount.
+      # The migration job only talks to PostgreSQL — it makes no Kubernetes
+      # API calls, so it needs no RBAC. Making the chart's ServiceAccount a
+      # hook resource just to satisfy pre-install ordering would complicate
+      # its lifecycle for no benefit.
+      initContainers:
+        - name: wait-for-postgres
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h {{ include "reference-stack.postgresHost" . }} -p {{ .Values.postgres.service.port }} -U {{ .Values.postgres.auth.username }}; do
+                echo "waiting for postgres..."
+                sleep 2
+              done
+      containers:
+        - name: migrate
+          image: "{{ .Values.migration.image.repository }}:{{ .Values.migration.image.tag }}"
+          imagePullPolicy: {{ .Values.migration.image.pullPolicy }}
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "reference-stack.fullname" . }}-config
+            - secretRef:
+                name: {{ include "reference-stack.fullname" . }}-secret
+      # -- 300s: same reasoning as job.yaml — this Job is the sole backstop
+      # against a hung migration once nothing else in the install path
+      # times out the wait.
+      activeDeadlineSeconds: 300
+{{- end }}

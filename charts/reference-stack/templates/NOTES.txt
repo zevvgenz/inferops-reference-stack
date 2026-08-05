@@ -1,0 +1,19 @@
+reference-stack {{ .Chart.AppVersion }} has been deployed (release: {{ .Release.Name }}).
+
+Verify the app is reachable:
+
+  kubectl port-forward svc/{{ include "reference-stack.fullname" . }}-app {{ .Values.app.service.port }}:{{ .Values.app.service.port }} -n {{ .Release.Namespace }}
+  curl -sf http://localhost:{{ .Values.app.service.port }}/healthz
+  curl -sf http://localhost:{{ .Values.app.service.port }}/readyz
+
+Check the migration Job completed:
+
+  kubectl get job {{ include "reference-stack.fullname" . }}-migration -n {{ .Release.Namespace }}
+
+Check all pods are Ready:
+
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+Or just run:
+
+  make verify

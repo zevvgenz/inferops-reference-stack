@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "reference-stack.postgresHost" . }}
+  labels:
+    {{- include "reference-stack.componentSelectorLabels" (dict "component" "postgres" "context" $) | nindent 4 }}
+    {{- include "reference-stack.labels" . | nindent 4 }}
+spec:
+  # -- Headless: StatefulSet pods are addressed individually, and with a
+  # single replica this is really just a stable DNS name for the app/Job.
+  clusterIP: None
+  selector:
+    {{- include "reference-stack.componentSelectorLabels" (dict "component" "postgres" "context" $) | nindent 4 }}
+  ports:
+    - name: postgres
+      port: {{ .Values.postgres.service.port }}
+      targetPort: postgres

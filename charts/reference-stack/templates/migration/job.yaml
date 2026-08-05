@@ -1,0 +1,85 @@
+{{/*
+Plain-Helm path: this Job runs as a post-install/post-upgrade hook.
+Mutually exclusive with argocd-job.yaml — see the `if` guard below and
+.Values.argocd.enabled. Do not enable both; the migration would run twice
+per release.
+
+Why post-install, not pre-install: see docs/decisions.md "Migration
+ordering". Postgres/Redis/Secret/ConfigMap are ordinary chart resources,
+not hooks — a pre-install Job would run before any of them exist. Running
+post-install instead means Postgres is being created in parallel with this
+Job (hence the wait-for-postgres initContainer below), and the app
+Deployment is gated correctly not by hook timing but by its own /readyz
+readiness probe, which stays false until this Job has created the schema.
+`helm install --wait` blocks on both the Job and the Deployment's
+readiness, so the release only reports success once the stack actually
+works end to end.
+*/}}
+{{- if not .Values.argocd.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "reference-stack.fullname" . }}-migration
+  labels:
+    {{- include "reference-stack.componentSelectorLabels" (dict "component" "migration" "context" $) | nindent 4 }}
+    {{- include "reference-stack.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    # -- before-hook-creation: delete any leftover Job from a previous
+    # install/upgrade attempt before creating this one. Without it, a Job
+    # left behind by a failed release blocks every subsequent retry with a
+    # stale "resource not ready" error — this bit us during local
+    # verification.
+    # hook-succeeded: also clean up after a successful run so a re-run
+    # starts clean. Deliberately NOT hook-failed — a failed migration Job
+    # must survive so `kubectl logs` on it is still possible for debugging;
+    # the next before-hook-creation cleans it up on the next attempt anyway.
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  # -- See values.yaml migration.backoffLimit for the reasoning: one retry
+  # covers a transient race, not a real reason to hammer a broken migration.
+  backoffLimit: {{ .Values.migration.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "reference-stack.componentSelectorLabels" (dict "component" "migration" "context" $) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      # Intentionally runs under the namespace default ServiceAccount.
+      # The migration job only talks to PostgreSQL — it makes no Kubernetes
+      # API calls, so it needs no RBAC.
+      # -- Wait for Postgres to actually accept connections rather than
+      # racing it. `pg_isready` polling beats a fixed `sleep`: it succeeds
+      # as soon as the database is ready and keeps retrying (bounded by
+      # activeDeadlineSeconds below) if startup is slower than usual. Now
+      # load-bearing: Postgres starts in parallel with this Job (both are
+      # ordinary resources of the same release), not before it.
+      initContainers:
+        - name: wait-for-postgres
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h {{ include "reference-stack.postgresHost" . }} -p {{ .Values.postgres.service.port }} -U {{ .Values.postgres.auth.username }}; do
+                echo "waiting for postgres..."
+                sleep 2
+              done
+      containers:
+        - name: migrate
+          image: "{{ .Values.migration.image.repository }}:{{ .Values.migration.image.tag }}"
+          imagePullPolicy: {{ .Values.migration.image.pullPolicy }}
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "reference-stack.fullname" . }}-config
+            - secretRef:
+                name: {{ include "reference-stack.fullname" . }}-secret
+      # -- 300s: with --wait removed from `make install` (see the Makefile
+      # comment and docs/decisions.md), this Job is now the sole backstop
+      # against a hung migration — nothing else times out the wait. Long
+      # enough to tolerate a slow Postgres cold start, short enough that
+      # `make verify` fails fast and loud instead of hanging indefinitely.
+      activeDeadlineSeconds: 300
+{{- end }}

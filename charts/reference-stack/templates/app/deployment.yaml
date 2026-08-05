@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "reference-stack.fullname" . }}-app
+  labels:
+    {{- include "reference-stack.componentSelectorLabels" (dict "component" "app" "context" $) | nindent 4 }}
+    {{- include "reference-stack.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.app.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "reference-stack.componentSelectorLabels" (dict "component" "app" "context" $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "reference-stack.componentSelectorLabels" (dict "component" "app" "context" $) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "reference-stack.serviceAccountName" . }}
+      # -- This pod starts immediately, in parallel with the migration Job
+      # (post-install/post-upgrade or PostSync hook — see
+      # templates/migration/). It is not gated by hook timing: the
+      # readinessProbe below hits /readyz, which stays false until the Job
+      # has created the schema, so the pod never receives traffic before
+      # the stack is actually usable. See docs/decisions.md
+      # "Migration ordering".
+      containers:
+        - name: app
+          image: "{{ .Values.app.image.repository }}:{{ .Values.app.image.tag }}"
+          imagePullPolicy: {{ .Values.app.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: {{ include "reference-stack.fullname" . }}-config
+            - secretRef:
+                name: {{ include "reference-stack.fullname" . }}-secret
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.app.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.app.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.app.probes.liveness.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.app.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.app.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.app.probes.readiness.periodSeconds }}
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}

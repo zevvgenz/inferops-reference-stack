@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "reference-stack.fullname" . }}-redis
+  labels:
+    {{- include "reference-stack.componentSelectorLabels" (dict "component" "redis" "context" $) | nindent 4 }}
+    {{- include "reference-stack.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "reference-stack.componentSelectorLabels" (dict "component" "redis" "context" $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "reference-stack.componentSelectorLabels" (dict "component" "redis" "context" $) | nindent 8 }}
+    spec:
+      containers:
+        - name: redis
+          image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
+          imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
+          ports:
+            - name: redis
+              containerPort: 6379
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}

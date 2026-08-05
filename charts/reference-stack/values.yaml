@@ -1,0 +1,130 @@
+# Default values for reference-stack.
+# Every tunable used by the templates must be exposed here with a sensible
+# default. Keep comments accurate — they are the primary documentation for
+# anyone running `helm show values`.
+
+# -- Global toggle: are we being deployed via ArgoCD (GitOps) or plain Helm?
+# Controls which migration Job manifest renders (sync-wave vs Helm hook) —
+# see templates/migration/. Never both: they would run the migration twice.
+argocd:
+  enabled: false
+
+app:
+  image:
+    # -- Built locally with `make build` and loaded into kind with `make load`.
+    # No registry: this is a reference stack meant to run entirely offline
+    # on a laptop kind cluster.
+    repository: reference-stack-app
+    tag: dev
+    pullPolicy: Never
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+  # -- Liveness (/healthz) and readiness (/readyz) are deliberately
+  # different endpoints, not the same one with different timings: liveness
+  # must stay true whenever the process is up, regardless of whether
+  # Postgres/Redis are reachable yet, or Kubernetes restarts a healthy pod
+  # while it's waiting on a dependency. Readiness is what actually gates
+  # traffic — see docs/decisions.md "Liveness vs readiness" and
+  # app/main.py's module docstring.
+  #
+  # This is also what makes the post-install/post-upgrade migration Job
+  # ordering work (see docs/decisions.md "Migration ordering"): the app pod
+  # starts immediately alongside the migration Job, but /readyz keeps it
+  # out of the Service's endpoints — and `helm install --wait` blocks —
+  # until the Job has created the schema.
+  probes:
+    liveness:
+      path: /healthz
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    readiness:
+      path: /readyz
+      initialDelaySeconds: 3
+      periodSeconds: 5
+
+postgres:
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  service:
+    port: 5432
+  persistence:
+    # -- Size kept small deliberately: this stack targets an 8 GB RAM laptop
+    # kind cluster, not production data volumes.
+    size: 1Gi
+    storageClassName: standard
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  auth:
+    database: referencestack
+    username: referencestack
+    # -- Password comes from the Secret (see secrets/secrets.enc.yaml),
+    # never hardcoded here.
+
+redis:
+  image:
+    repository: redis
+    tag: "7-alpine"
+    pullPolicy: IfNotPresent
+  service:
+    port: 6379
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 64Mi
+# -- No persistence: Redis here is a pure cache, disposable by design.
+
+migration:
+  # -- Alembic migration Job. backoffLimit is deliberately low: a failed
+  # migration means a broken schema assumption, and retrying the same
+  # broken migration a dozen times wastes CI time without changing the
+  # outcome. One retry covers a transient connection race that the
+  # initContainer's readiness poll didn't fully close.
+  backoffLimit: 1
+  image:
+    repository: reference-stack-app
+    tag: dev
+    pullPolicy: Never
+# -- No sync-wave/hook-weight ordering needed: the migration Job runs as
+# a post-install/post-upgrade (Helm) or PostSync (ArgoCD) hook, and the
+# app Deployment's own /readyz readiness probe is what actually gates it
+# from serving traffic before the schema exists. See
+# docs/decisions.md "Migration ordering".
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+secrets:
+  # -- Intentionally left empty here. Populated at install time from
+  # secrets/secrets.dec.yaml (decrypted via `make secrets-decrypt`), passed
+  # with `helm install -f secrets/secrets.dec.yaml`. See templates/secret.yaml
+  # — it fails the render with a clear error if this is left unset.
+  postgresPassword: ""
+
+ingress:
+  # -- Disabled by default: this stack is meant to be reached via
+  # port-forward for local verification, not exposed by default.
+  enabled: false
+  className: ""
+  host: reference-stack.local
+  annotations: {}
