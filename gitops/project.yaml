@@ -1,0 +1,20 @@
+# Minimal AppProject. The default `default` AppProject (created by ArgoCD
+# itself) would work equally well for a single-app reference stack — this
+# exists mainly to make the trust boundary explicit and reviewable rather
+# than relying on ArgoCD's permissive built-in default, which allows any
+# repo/destination.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: reference-stack
+  namespace: argocd
+spec:
+  description: reference-stack GitOps project
+  sourceRepos:
+    - "https://github.com/zevvgenz/inferops-reference-stack.git"
+  destinations:
+    - namespace: default
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace

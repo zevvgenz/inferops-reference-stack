@@ -1,0 +1,53 @@
+# ArgoCD Application pointing at the chart in this same repository. The
+# repo is private, so ArgoCD needs a registered repository credential
+# (`argocd repo add ... --username ... --password ...` or an SSH deploy
+# key) before this Application can actually sync — see README "GitOps"
+# for the exact command. `make argocd` installs ArgoCD itself but does not
+# register credentials or apply this Application automatically: doing so
+# would mean embedding a credential (even a placeholder) in a file meant
+# to be committed, which contradicts the "no secrets in any commit" rule.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: reference-stack
+  namespace: argocd
+spec:
+  project: reference-stack
+  source:
+    repoURL: "https://github.com/zevvgenz/inferops-reference-stack.git"
+    targetRevision: main
+    path: charts/reference-stack
+    helm:
+      # -- Mirrors the plain-Helm path's requirement: the chart's
+      # secret.yaml template fails its `required` check without a
+      # postgresPassword. On the GitOps path this would normally come
+      # from a SOPS-aware ArgoCD plugin (e.g. argocd-vault-plugin or the
+      # helm-secrets plugin) rather than a plain `-f` flag, which is out
+      # of scope for this reference stack's time budget — see README
+      # "GitOps" for how to supply it manually for a demo sync.
+      valuesObject:
+        argocd:
+          enabled: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      # -- prune: removes resources that were deleted from the chart on
+      # the next sync, keeping the cluster from accumulating orphans.
+      prune: true
+      # -- selfHeal: reverts manual `kubectl edit`/`kubectl delete`
+      # drift back to what's declared in Git on the next sync interval.
+      # This is the right default for a reference stack demonstrating
+      # GitOps discipline — Git is meant to be the only place changes
+      # are made. It is the WRONG default whenever a fast manual
+      # intervention is a legitimate operational tool: an incident
+      # responder scaling a Deployment to 0 to stop a runaway process,
+      # or patching a Secret by hand to unblock something urgent, will
+      # have that change silently reverted on the next sync, which can
+      # turn a controlled mitigation into a surprise. Production setups
+      # commonly disable selfHeal (or scope it away from the specific
+      # resource) during an active incident and re-enable it afterward.
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
