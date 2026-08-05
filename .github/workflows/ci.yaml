@@ -1,0 +1,97 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  # Keep in sync with Makefile's ARGOCD_VERSION comment / pinning policy —
+  # this workflow doesn't install ArgoCD, but chart/image tool versions
+  # below follow the same "pin, don't float" rule. Verified against each
+  # project's actual latest release at the time this was written
+  # (2026-08-06), not assumed from memory.
+  KIND_VERSION: "v0.32.0"
+  HELM_VERSION: "v4.2.3"
+  YAMLLINT_VERSION: "1.38.0"
+
+jobs:
+  lint:
+    name: lint (helm, yaml, shell)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install helm
+        uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: helm lint
+        run: helm lint charts/reference-stack --set secrets.postgresPassword=lint-placeholder
+
+      - name: helm template (plain-Helm path)
+        run: helm template reference-stack charts/reference-stack --set secrets.postgresPassword=lint-placeholder > /dev/null
+
+      - name: helm template (ArgoCD path)
+        run: helm template reference-stack charts/reference-stack --set secrets.postgresPassword=lint-placeholder --set argocd.enabled=true > /dev/null
+
+      - name: Install yamllint
+        run: pip install "yamllint==${{ env.YAMLLINT_VERSION }}"
+
+      - name: yamllint
+        run: yamllint charts gitops kind .github
+
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+
+  install-and-verify:
+    name: kind install + verify
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install helm
+        uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.14.0
+        with:
+          version: ${{ env.KIND_VERSION }}
+          cluster_name: reference-stack
+          config: kind/kind-config.yaml
+
+      - name: Build app image
+        run: docker build -t reference-stack-app:dev ./app
+
+      - name: Load image into kind
+        run: kind load docker-image reference-stack-app:dev --name reference-stack
+
+      - name: helm install
+        # No --wait — see docs/decisions.md "Migration ordering (round 2)"
+        # and the Makefile's install target comment: the app Deployment's
+        # readiness depends on a post-install hook that --wait would block
+        # ahead of. `make verify` (invoked below) is what actually waits.
+        #
+        # -f values-ci.yaml, not SOPS: CI has no access to the age private
+        # key (see values-ci.yaml's own comment). This is CI-only,
+        # obviously-fake credential material, not a decrypted production
+        # secret.
+        run: |
+          helm upgrade --install reference-stack charts/reference-stack \
+            --namespace default \
+            -f charts/reference-stack/values-ci.yaml
+
+      - name: make verify
+        run: ./scripts/verify.sh reference-stack default
+
+      - name: Dump pod state on failure
+        if: failure()
+        run: |
+          kubectl get pods -n default -o wide
+          kubectl describe pods -n default
+          kubectl logs -n default -l app.kubernetes.io/component=app --tail=200 || true
+          kubectl logs -n default -l app.kubernetes.io/component=migration --tail=200 || true

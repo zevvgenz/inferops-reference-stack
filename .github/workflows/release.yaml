@@ -1,0 +1,47 @@
+# Publishes charts/reference-stack as a Helm chart repo on GitHub Pages,
+# via chart-releaser-action (https://github.com/helm/chart-releaser-action).
+#
+# One-time repo setup required before this workflow can succeed (not done
+# by this workflow itself — it's an external, repo-settings-level change):
+# GitHub Pages must be enabled for this repository, serving from the
+# `gh-pages` branch, which chart-releaser-action creates and maintains.
+# See README "Releasing" for the exact steps.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+# Required by chart-releaser-action to push a release commit/tag and
+# publish to the gh-pages branch it manages.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: package and publish chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        # chart-releaser-action commits an index update to gh-pages;
+        # requires a committer identity, not real credentials.
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install helm
+        uses: azure/setup-helm@v5
+        with:
+          version: "v4.2.3"
+
+      - name: Run chart-releaser
+        uses: helm/chart-releaser-action@v1.7.0
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        with:
+          charts_dir: charts

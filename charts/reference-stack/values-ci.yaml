@@ -1,0 +1,11 @@
+# CI-only values overlay. CI has no access to the SOPS/age private key (it
+# lives at ~/.config/sops/age/keys.txt on a developer's machine, never in
+# this repo or in CI secrets — see docs/decisions.md and README "Secrets"),
+# so it cannot decrypt secrets/secrets.enc.yaml the way `make install`
+# does locally. Rather than smuggle a real credential into GitHub Secrets
+# for a reference stack that has no real production database to protect,
+# CI supplies this obviously-fake password directly via -f, in addition to
+# the chart's normal values.yaml. This file must never contain anything
+# that resembles a real credential.
+secrets:
+  postgresPassword: "ci-only-not-a-real-secret"
