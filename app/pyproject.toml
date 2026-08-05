@@ -1,0 +1,19 @@
+[project]
+name = "reference-stack-app"
+version = "0.1.0"
+description = "Trivial FastAPI service proving the reference-stack wiring works."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "sqlalchemy==2.0.36",
+    "psycopg[binary]==3.2.3",
+    "redis==5.2.1",
+    "alembic==1.14.0",
+    "pydantic-settings==2.7.0",
+]
+
+# No [build-system] here on purpose: main.py/db.py are top-level modules,
+# not an installable package. This file is the single source of truth for
+# dependency versions; requirements.txt mirrors it exactly for the
+# Dockerfile's `pip install -r`. Keep both in sync when bumping a version.
