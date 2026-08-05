@@ -1,0 +1,17 @@
+# yamllint config.
+#
+# charts/**/templates/ is intentionally excluded: those files are Go
+# template syntax ({{ }}), not valid standalone YAML — `helm lint` and
+# `helm template` already validate them after rendering, which is the
+# correct tool for that job. yamllint here covers the plain YAML: chart
+# metadata/values, the kind config, GitOps manifests, and CI workflows.
+extends: default
+
+ignore: |
+  charts/reference-stack/templates/
+
+rules:
+  line-length: disable
+  document-start: disable
+  truthy:
+    check-keys: false
