@@ -1,0 +1,8 @@
+# SOPS encryption rule: any file under secrets/ matching *.enc.yaml is
+# encrypted to this age public key. The matching private key must exist at
+# SOPS's default lookup path (~/.config/sops/age/keys.txt on macOS/Linux)
+# for `make secrets-decrypt` to work — see README "Secrets" for how to
+# generate one.
+creation_rules:
+  - path_regex: secrets/.*\.enc\.yaml$
+    age: age1kma9tscj5u2a09pwgrm75y7xggz48974nlxgy8xpulmzl35yn3xsd8v5mj

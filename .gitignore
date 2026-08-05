@@ -20,5 +20,12 @@ node_modules/
 .vscode/
 .idea/
 
+# Decrypted secrets: never commit plaintext. secrets/*.enc.yaml (SOPS
+# ciphertext) and secrets/age.pub are meant to be committed; only the
+# decrypted output is excluded.
+secrets/*.dec.yaml
+*.decrypted.yaml
+kubeconfig*
+
 # Claude Code local state
 .claude/settings.local.json
