@@ -5,6 +5,13 @@ metadata:
   labels:
     {{- include "reference-stack.componentSelectorLabels" (dict "component" "redis" "context" $) | nindent 4 }}
     {{- include "reference-stack.labels" . | nindent 4 }}
+  {{- if .Values.argocd.enabled }}
+  annotations:
+    # -- Wave -1: see templates/postgres/statefulset.yaml. Redis has no
+    # ordering dependency of its own, but grouping it with Postgres keeps
+    # "infra" in one wave rather than spreading it across three.
+    argocd.argoproj.io/sync-wave: "-1"
+  {{- end }}
 spec:
   replicas: 1
   selector:

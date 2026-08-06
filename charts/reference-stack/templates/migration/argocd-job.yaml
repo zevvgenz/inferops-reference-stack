@@ -1,19 +1,31 @@
 {{/*
-GitOps path: ArgoCD uses its own hook lifecycle instead of Helm's — this
-renders as a plain Job with an ArgoCD PostSync hook annotation, not through
-`helm install/upgrade` hook machinery at all (ArgoCD doesn't invoke that).
-Mutually exclusive with job.yaml — see the `if` guard below and
-.Values.argocd.enabled. Do not enable both; the migration would run twice
-per sync.
+GitOps path: an ordinary (non-hook) Job ordered by sync-wave, not an
+ArgoCD PreSync/PostSync hook. Mutually exclusive with job.yaml — see the
+`if` guard below and .Values.argocd.enabled. Do not enable both; the
+migration would run twice per sync.
 
-Why PostSync, not a pre-sync wave: see docs/decisions.md "Migration
-ordering". Same reasoning as the plain-Helm path — Postgres/Redis/Secret/
-ConfigMap are ordinary resources that sync in the main wave (wave 0)
-alongside this Job (hence wait-for-postgres below), and the app Deployment
-is gated by its own /readyz readiness probe rather than by sync-wave
-timing. ArgoCD's health check for a Job is "Completed", and PostSync hooks
-run after the main sync wave reaches a healthy state, which is sufficient
-ordering on its own — no sync-wave annotation needed.
+Why sync-wave, not a hook: see docs/decisions.md "Migration ordering
+(ArgoCD): sync-waves, not hooks". Both hook phases deadlock or reproduce
+the pre-install chicken-and-egg problem:
+  - PostSync deadlocks — ArgoCD's sync operation waits for the main
+    wave's resources (including the app Deployment) to report Healthy
+    BEFORE running PostSync hooks, but the Deployment can only become
+    Healthy once /readyz is happy, which itself depends on this Job
+    having run. There's no --wait flag to remove here, unlike the
+    plain-Helm path: ArgoCD's sync semantics always wait on wave health
+    before advancing.
+  - PreSync runs before ANY ordinary resource in the release, reproducing
+    the plain-Helm pre-install problem: Postgres wouldn't exist yet, and
+    wait-for-postgres would poll a Service that is never coming — nothing
+    in that phase creates it.
+Sync-waves solve this properly: they're ArgoCD's native ordering
+mechanism for the normal reconciliation flow, not an escape hatch for
+work that happens outside it. Wave -2 (Secret/ConfigMap) -> wave -1
+(Postgres/Redis) -> wave 0 (this Job) -> wave 1 (app Deployment/Service).
+ArgoCD waits for each wave's resources to report Healthy before starting
+the next; healthy for a Job means Completed. The app Deployment is
+therefore never even created until this Job has finished — ordering
+without a hook and without a deadlock.
 */}}
 {{- if .Values.argocd.enabled }}
 apiVersion: batch/v1
@@ -24,13 +36,7 @@ metadata:
     {{- include "reference-stack.componentSelectorLabels" (dict "component" "migration" "context" $) | nindent 4 }}
     {{- include "reference-stack.labels" . | nindent 4 }}
   annotations:
-    argocd.argoproj.io/hook: PostSync
-    # -- BeforeHookCreation: same reasoning as the plain-Helm Job's
-    # before-hook-creation (see job.yaml) — a leftover Job from a previous
-    # sync attempt must not block the next one. Deliberately NOT
-    # HookFailed — a failed migration Job must survive for `kubectl logs`
-    # debugging; the next BeforeHookCreation cleans it up on the next sync.
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   backoffLimit: {{ .Values.migration.backoffLimit }}
   template:
@@ -41,9 +47,12 @@ spec:
       restartPolicy: Never
       # Intentionally runs under the namespace default ServiceAccount.
       # The migration job only talks to PostgreSQL — it makes no Kubernetes
-      # API calls, so it needs no RBAC. Making the chart's ServiceAccount a
-      # hook resource just to satisfy pre-install ordering would complicate
-      # its lifecycle for no benefit.
+      # API calls, so it needs no RBAC.
+      # -- Wave -1 puts Postgres ahead of this Job, so this initContainer
+      # is a safety margin against a slow Postgres cold start, not a
+      # workaround for missing ordering (contrast with the plain-Helm
+      # path, where it's load-bearing because Postgres starts in
+      # parallel with the Job).
       initContainers:
         - name: wait-for-postgres
           image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
@@ -65,8 +74,9 @@ spec:
                 name: {{ include "reference-stack.fullname" . }}-config
             - secretRef:
                 name: {{ include "reference-stack.fullname" . }}-secret
-      # -- 300s: same reasoning as job.yaml — this Job is the sole backstop
-      # against a hung migration once nothing else in the install path
-      # times out the wait.
+      # -- 300s: this Job is what gates the app Deployment's very creation
+      # on the ArgoCD path (see the comment above) — a hung migration
+      # should fail loudly within a bounded time rather than leave the
+      # sync looking perpetually "in progress" with no obvious cause.
       activeDeadlineSeconds: 300
 {{- end }}

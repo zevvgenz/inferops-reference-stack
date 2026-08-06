@@ -5,6 +5,11 @@ metadata:
   labels:
     {{- include "reference-stack.componentSelectorLabels" (dict "component" "redis" "context" $) | nindent 4 }}
     {{- include "reference-stack.labels" . | nindent 4 }}
+  {{- if .Values.argocd.enabled }}
+  annotations:
+    # -- Wave -1: see templates/redis/deployment.yaml.
+    argocd.argoproj.io/sync-wave: "-1"
+  {{- end }}
 spec:
   type: ClusterIP
   selector:

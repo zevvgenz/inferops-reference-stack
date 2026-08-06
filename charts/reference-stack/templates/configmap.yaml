@@ -4,6 +4,12 @@ metadata:
   name: {{ include "reference-stack.fullname" . }}-config
   labels:
     {{- include "reference-stack.labels" . | nindent 4 }}
+  {{- if .Values.argocd.enabled }}
+  annotations:
+    # -- Wave -2: see templates/secret.yaml and
+    # templates/migration/argocd-job.yaml for the ordering rationale.
+    argocd.argoproj.io/sync-wave: "-2"
+  {{- end }}
 data:
   # -- Non-secret app configuration. Credentials live in the Secret instead.
   POSTGRES_HOST: {{ include "reference-stack.postgresHost" . }}

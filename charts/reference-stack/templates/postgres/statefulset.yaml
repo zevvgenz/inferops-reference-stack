@@ -5,6 +5,17 @@ metadata:
   labels:
     {{- include "reference-stack.componentSelectorLabels" (dict "component" "postgres" "context" $) | nindent 4 }}
     {{- include "reference-stack.labels" . | nindent 4 }}
+  {{- if .Values.argocd.enabled }}
+  annotations:
+    # -- Wave -1: ahead of the migration Job (0) and the app (1), behind
+    # Secret/ConfigMap (-2) which it doesn't actually consume but which
+    # establishes the intended reading order. See
+    # templates/migration/argocd-job.yaml for the full rationale. No
+    # hook involved — this is an ordinary resource, deliberately never
+    # made a hook resource (see docs/decisions.md "PVC lifecycle" for why
+    # that would be dangerous for a StatefulSet's PVC).
+    argocd.argoproj.io/sync-wave: "-1"
+  {{- end }}
 spec:
   serviceName: {{ include "reference-stack.postgresHost" . }}
   replicas: 1

@@ -5,6 +5,16 @@ metadata:
   labels:
     {{- include "reference-stack.componentSelectorLabels" (dict "component" "app" "context" $) | nindent 4 }}
     {{- include "reference-stack.labels" . | nindent 4 }}
+  {{- if .Values.argocd.enabled }}
+  annotations:
+    # -- Wave 1: after the migration Job (0). On the ArgoCD path this
+    # Deployment is not even created until the Job reports Completed —
+    # see templates/migration/argocd-job.yaml for the full rationale.
+    # The plain-Helm path has no equivalent wave mechanism; there,
+    # /readyz below is what gates it instead (see docs/decisions.md
+    # "Migration ordering (round 1)" and "(round 2)").
+    argocd.argoproj.io/sync-wave: "1"
+  {{- end }}
 spec:
   replicas: {{ .Values.app.replicaCount }}
   selector:
@@ -16,12 +26,15 @@ spec:
         {{- include "reference-stack.componentSelectorLabels" (dict "component" "app" "context" $) | nindent 8 }}
     spec:
       serviceAccountName: {{ include "reference-stack.serviceAccountName" . }}
-      # -- This pod starts immediately, in parallel with the migration Job
-      # (post-install/post-upgrade or PostSync hook — see
-      # templates/migration/). It is not gated by hook timing: the
-      # readinessProbe below hits /readyz, which stays false until the Job
-      # has created the schema, so the pod never receives traffic before
-      # the stack is actually usable. See docs/decisions.md
+      # -- On the plain-Helm path, this pod starts immediately, in
+      # parallel with the migration Job (post-install/post-upgrade hook —
+      # see templates/migration/job.yaml). It is not gated by hook
+      # timing there: the readinessProbe below hits /readyz, which stays
+      # false until the Job has created the schema, so the pod never
+      # receives traffic before the stack is actually usable. On the
+      # ArgoCD path, the sync-wave annotation above means this Deployment
+      # isn't created at all until the Job completes — /readyz is
+      # redundant there but harmless to leave on. See docs/decisions.md
       # "Migration ordering".
       containers:
         - name: app

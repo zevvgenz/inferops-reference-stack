@@ -4,8 +4,11 @@
 # anyone running `helm show values`.
 
 # -- Global toggle: are we being deployed via ArgoCD (GitOps) or plain Helm?
-# Controls which migration Job manifest renders (sync-wave vs Helm hook) —
-# see templates/migration/. Never both: they would run the migration twice.
+# Controls which migration Job manifest renders — a sync-wave-annotated
+# ordinary resource on the ArgoCD path, a post-install hook on the
+# plain-Helm path — and whether every other template gets a
+# sync-wave annotation too. See templates/migration/. Never both: they
+# would run the migration twice.
 argocd:
   enabled: false
 
@@ -103,11 +106,14 @@ migration:
     repository: reference-stack-app
     tag: dev
     pullPolicy: Never
-# -- No sync-wave/hook-weight ordering needed: the migration Job runs as
-# a post-install/post-upgrade (Helm) or PostSync (ArgoCD) hook, and the
-# app Deployment's own /readyz readiness probe is what actually gates it
-# from serving traffic before the schema exists. See
-# docs/decisions.md "Migration ordering".
+# -- Ordering differs by path, deliberately: on plain Helm, this Job runs
+# as a post-install/post-upgrade hook and the app Deployment's own
+# /readyz readiness probe is what gates it from serving traffic before
+# the schema exists (no hook-weight needed). On ArgoCD, this Job and
+# every other template are ordinary sync-wave-annotated resources, not
+# hooks — see templates/migration/argocd-job.yaml for why hooks deadlock
+# on that path, and docs/decisions.md "Migration ordering" for the full
+# reasoning behind both.
 
 serviceAccount:
   create: true

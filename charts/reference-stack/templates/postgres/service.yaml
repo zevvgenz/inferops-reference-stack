@@ -5,6 +5,11 @@ metadata:
   labels:
     {{- include "reference-stack.componentSelectorLabels" (dict "component" "postgres" "context" $) | nindent 4 }}
     {{- include "reference-stack.labels" . | nindent 4 }}
+  {{- if .Values.argocd.enabled }}
+  annotations:
+    # -- Wave -1: see templates/postgres/statefulset.yaml.
+    argocd.argoproj.io/sync-wave: "-1"
+  {{- end }}
 spec:
   # -- Headless: StatefulSet pods are addressed individually, and with a
   # single replica this is really just a stable DNS name for the app/Job.
